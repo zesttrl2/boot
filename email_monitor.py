@@ -4,32 +4,9 @@ from email.header import decode_header
 import requests
 import time
 import os
+import threading
 from config import *
-
-
-PROCESSED_MESSAGES_FILE = "processed_messages.txt"
-
-
-def load_processed_messages():
-    processed = set()
-    try:
-        if os.path.exists(PROCESSED_MESSAGES_FILE):
-            with open(PROCESSED_MESSAGES_FILE, 'r', encoding='utf-8') as f:
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        processed.add(line)
-    except Exception as e:
-        print(f"加载已处理邮件列表时出错: {e}")
-    return processed
-
-
-def save_processed_message(message_id):
-    try:
-        with open(PROCESSED_MESSAGES_FILE, 'a', encoding='utf-8') as f:
-            f.write(message_id + '\n')
-    except Exception as e:
-        print(f"保存已处理邮件时出错: {e}")
+from models import save_email, get_all_emails, mark_all_as_pushed
 
 
 def decode_str(s):
@@ -55,8 +32,7 @@ def send_pushplus(title, content):
     data = {
         "token": PUSHPLUS_TOKEN,
         "title": title,
-        "content": content,
-        "topic": "测试"
+        "content": content
     }
     try:
         response = requests.post(PUSHPLUS_URL, data=data)
@@ -67,9 +43,6 @@ def send_pushplus(title, content):
 
 
 def check_emails():
-    processed_messages = load_processed_messages()
-    new_emails = []
-
     try:
         print(f"尝试连接到POP3服务器: {POP3_SERVER}")
         pop_conn = poplib.POP3_SSL(POP3_SERVER, POP3_PORT)
@@ -82,6 +55,8 @@ def check_emails():
         
         num_messages = len(pop_conn.list()[1])
         print(f"邮箱共有 {num_messages} 封邮件")
+        
+        new_saved_count = 0
         
         for i in range(max(1, num_messages - 50), num_messages + 1):
             try:
@@ -99,9 +74,6 @@ def check_emails():
                 if not message_id:
                     message_id = f"auto_id_{i}_{int(time.time())}"
                 
-                if message_id in processed_messages:
-                    continue
-                
                 body = ""
                 if msg.is_multipart():
                     for part in msg.walk():
@@ -118,24 +90,19 @@ def check_emails():
                     except:
                         pass
                 
-                new_emails.append({
-                    "id": i,
-                    "subject": subject,
-                    "from": from_,
-                    "date": date,
-                    "body": body,
-                    "message_id": message_id
-                })
-                
-                save_processed_message(message_id)
-                print(f"发现新邮件: {subject}")
+                if save_email(message_id, subject, from_, date, body):
+                    new_saved_count += 1
+                    print(f"发现并保存新邮件: {subject}")
                 
             except Exception as e:
                 print(f"获取第 {i} 封邮件时出错: {e}")
                 continue
         
         pop_conn.quit()
-        print("检查完成")
+        print(f"检查完成，共保存 {new_saved_count} 封新邮件")
+        
+        if new_saved_count > 0:
+            push_all_emails()
         
     except Exception as e:
         print(f"检查邮件出错: {e}")
@@ -148,23 +115,52 @@ def check_emails():
         print("6. 尝试在网页端登录后，再运行此程序")
         print("7. 检查授权码是否正确")
         return False
-
-    if new_emails:
-        for mail_info in new_emails:
-            title = f"新邮件: {mail_info['subject']}"
-            content = f" {mail_info['from']}\n {mail_info['date']}\n\n{mail_info['body'][:500]}"
-            print(f"推送邮件: {title}")
-            send_pushplus(title, content)
-        
-        print(f"已处理 {len(new_emails)} 封新邮件")
     
     return True
+
+
+def push_all_emails():
+    all_emails = get_all_emails()
+    print(f"开始推送所有 {len(all_emails)} 封邮件")
+    
+    content_parts = []
+    for idx, email_data in enumerate(all_emails, 1):
+        email_id, message_id, subject, sender, date, body, created_at, is_pushed = email_data
+        
+        content_part = f"【邮件 {idx}】\n"
+        content_part += f"主题: {subject}\n"
+        content_part += f"发件人: {sender}\n"
+        content_part += f"日期: {date}\n"
+        content_part += f"内容:\n{body[:200]}...\n"
+        content_part += "-" * 50 + "\n"
+        
+        content_parts.append(content_part)
+    
+    full_content = "\n".join(content_parts)
+    title = f"📧 新邮件通知 - 共 {len(all_emails)} 封"
+    
+    print(f"推送邮件汇总: {title}")
+    result = send_pushplus(title, full_content)
+    
+    if result:
+        mark_all_as_pushed()
+        print(f"推送成功，已标记所有邮件为已推送")
+
+
+def start_flask():
+    from app import app
+    app.run(debug=False, host='0.0.0.0', port=3000)
 
 
 def main():
     print(f"开始监听163邮箱: {EMAIL_USER}")
     print(f"检查间隔: {CHECK_INTERVAL} 秒")
-    print(f"已处理邮件列表保存在: {PROCESSED_MESSAGES_FILE}")
+    print(f"Web界面地址: http://localhost:3000")
+    
+    flask_thread = threading.Thread(target=start_flask, daemon=True)
+    flask_thread.start()
+    
+    time.sleep(2)
     
     while True:
         check_emails()

@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>霍尔木兹海峡船只通过记录</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background-color: #f5f5f5;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 20px;
+        }
+        
+        .page-info {
+            text-align: center;
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 15px;
+        }
+        
+        .daily-stats {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+        }
+        
+        .stat-item {
+            background: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+            font-size: 14px;
+            color: #333;
+        }
+        
+        .stat-item .date {
+            font-weight: 600;
+            color: #1a73e8;
+        }
+        
+        .stat-item .count {
+            font-weight: 700;
+            color: #ea4335;
+            margin-left: 5px;
+        }
+        
+        .timeline {
+            position: relative;
+            padding-left: 100px;
+        }
+        
+        .timeline-item {
+            position: relative;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: flex-start;
+        }
+        
+        .timeline-time {
+            width: 80px;
+            flex-shrink: 0;
+            text-align: right;
+            padding-right: 20px;
+            color: #666;
+            font-size: 14px;
+            font-weight: 500;
+        }
+        
+        .timeline-content {
+            flex: 1;
+            background: white;
+            border-radius: 12px;
+            padding: 16px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        .timeline-content:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        
+        .email-body {
+            font-size: 15px;
+            color: #333;
+            line-height: 1.6;
+            font-weight: 500;
+        }
+        
+        .pushed-badge {
+            display: inline-block;
+            background: #e8f0fe;
+            color: #1a73e8;
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 10px;
+            margin-left: 8px;
+        }
+        
+        .not-pushed {
+            background: #fef3c7;
+            color: #d97706;
+        }
+        
+        .pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+            margin-top: 30px;
+            padding: 20px 0;
+        }
+        
+        .pagination a, .pagination span {
+            padding: 8px 16px;
+            border-radius: 6px;
+            text-decoration: none;
+            color: #333;
+            background: white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            transition: all 0.2s;
+        }
+        
+        .pagination a:hover {
+            background: #1a73e8;
+            color: white;
+        }
+        
+        .pagination .current {
+            background: #1a73e8;
+            color: white;
+            font-weight: 600;
+        }
+        
+        .pagination .disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .pagination .disabled:hover {
+            background: white;
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>霍尔木兹海峡船只通过记录</h1>
+        
+        {% if pagination %}
+        <div class="page-info">
+            共 {{ pagination.total_count }} 条记录，第 {{ pagination.current_page }} / {{ pagination.total_pages }} 页
+        </div>
+        {% endif %}
+        
+        <div class="daily-stats">
+            {% for date, count in daily_stats %}
+            <div class="stat-item">
+                <span class="date">{{ date }}</span>
+                <span class="count">{{ count }}</span>
+            </div>
+            {% endfor %}
+        </div>
+        
+        <div class="timeline">
+            {% for email in emails %}
+            <div class="timeline-item">
+                <div class="timeline-time">{{ email.time }}</div>
+                <div class="timeline-content">
+                    <div class="email-body">
+                        {{ email.body }}
+                        {% if email.is_pushed %}
+                        <span class="pushed-badge">✓ 已推送</span>
+                        {% else %}
+                        <span class="pushed-badge not-pushed">待推送</span>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        
+        {% if pagination and pagination.total_pages > 1 %}
+        <div class="pagination">
+            {% if pagination.has_prev %}
+            <a href="{{ url_for('index', page=pagination.prev_page) }}">上一页</a>
+            {% else %}
+            <span class="disabled">上一页</span>
+            {% endif %}
+            
+            {% for page_num in range(1, pagination.total_pages + 1) %}
+                {% if page_num == pagination.current_page %}
+                <span class="current">{{ page_num }}</span>
+                {% elif page_num == 1 or page_num == pagination.total_pages or (page_num >= pagination.current_page - 2 and page_num <= pagination.current_page + 2) %}
+                <a href="{{ url_for('index', page=page_num) }}">{{ page_num }}</a>
+                {% elif page_num == pagination.current_page - 3 or page_num == pagination.current_page + 3 %}
+                <span>...</span>
+                {% endif %}
+            {% endfor %}
+            
+            {% if pagination.has_next %}
+            <a href="{{ url_for('index', page=pagination.next_page) }}">下一页</a>
+            {% else %}
+            <span class="disabled">下一页</span>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+</body>
+</html>
