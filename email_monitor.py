@@ -5,6 +5,9 @@ import requests
 import time
 import os
 import threading
+import re
+from datetime import datetime
+from email.utils import parsedate_to_datetime
 from config import *
 from models import save_email, get_all_emails, mark_all_as_pushed
 
@@ -28,11 +31,69 @@ def decode_str(s):
     return ''.join(result)
 
 
+def parse_email_content(body):
+    try:
+        cleaned_body = re.sub(r'<img[^>]*>', '', body, flags=re.IGNORECASE)
+        cleaned_body = re.sub(r'https?://[^\s]+', '', cleaned_body)
+        cleaned_body = cleaned_body.strip()
+        
+        pattern = r'Hello,\s*(Vessel\s*(.*?))\s*is\s*passing\s*through\s*(.*?)(?:,|\.|\s*triggering time:)'
+        match = re.search(pattern, cleaned_body, re.IGNORECASE)
+        
+        if match:
+            vessel_part = match.group(1).strip()
+            location_part = match.group(3).strip()
+            
+            time_pattern = r'triggering time:(\d{4})-(\d{2})-(\d{2})\s*(\d{2}):(\d{2})'
+            time_match = re.search(time_pattern, cleaned_body)
+            
+            if time_match:
+                month = time_match.group(2)
+                day = time_match.group(3)
+                hour = time_match.group(4)
+                minute = time_match.group(5)
+                time_str = f"{month}-{day} {hour}:{minute}"
+                return f"{vessel_part}通过{location_part}（{time_str}）"
+            else:
+                return f"{vessel_part}通过{location_part}"
+        
+        return cleaned_body[:100]
+    except Exception as e:
+        return body[:100]
+
+
+def parse_email_date_to_datetime(date_str):
+    try:
+        dt = parsedate_to_datetime(date_str)
+        return dt
+    except:
+        try:
+            dt = datetime.strptime(date_str, '%a, %d %b %Y %H:%M:%S %z')
+            return dt
+        except:
+            return datetime.now()
+
+
+def parse_email_date(date_str):
+    try:
+        dt = parse_email_date_to_datetime(date_str)
+        today = datetime.now().date()
+        email_date = dt.date()
+        
+        if email_date == today:
+            return dt.strftime('%H:%M')
+        else:
+            return dt.strftime('%m-%d %H:%M')
+    except:
+        return date_str
+
+
 def send_pushplus(title, content):
     data = {
         "token": PUSHPLUS_TOKEN,
         "title": title,
-        "content": content
+        "content": content,
+        "topic": "测试"
     }
     try:
         response = requests.post(PUSHPLUS_URL, data=data)
@@ -123,21 +184,29 @@ def push_all_emails():
     all_emails = get_all_emails()
     print(f"开始推送所有 {len(all_emails)} 封邮件")
     
-    content_parts = []
-    for idx, email_data in enumerate(all_emails, 1):
+    email_list = []
+    for email_data in all_emails:
         email_id, message_id, subject, sender, date, body, created_at, is_pushed = email_data
         
-        content_part = f"【邮件 {idx}】\n"
-        content_part += f"主题: {subject}\n"
-        content_part += f"发件人: {sender}\n"
-        content_part += f"日期: {date}\n"
-        content_part += f"内容:\n{body[:200]}...\n"
-        content_part += "-" * 50 + "\n"
+        time_str = parse_email_date(date)
+        display_content = parse_email_content(body)
+        email_datetime = parse_email_date_to_datetime(date)
         
+        email_list.append({
+            'time': time_str,
+            'content': display_content,
+            'datetime': email_datetime
+        })
+    
+    email_list.sort(key=lambda x: x['datetime'], reverse=True)
+    
+    content_parts = []
+    for email_item in email_list:
+        content_part = f"{email_item['time']} {email_item['content']}\n"
         content_parts.append(content_part)
     
     full_content = "\n".join(content_parts)
-    title = f"📧 新邮件通知 - 共 {len(all_emails)} 封"
+    title = f"📧 新邮件通知 - 共 {len(email_list)} 封"
     
     print(f"推送邮件汇总: {title}")
     result = send_pushplus(title, full_content)
